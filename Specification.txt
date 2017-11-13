@@ -1,0 +1,60 @@
+
+Cloud Haskell / OTP evaluation
+==============================
+
+Specs
+=====
+
+The task is to implement a distributed computation.
+
+ 1.) for some time nodes send messages to each other, such that every 
+     node knows of every message.
+ 2.) choose a model of communication: broadcast or ring?
+ 3.) messages contain of a random number from (0,1]
+ 4.) during grace period, each node prints out a tuple of: 
+        <count m, sum i*m_i>
+     for this, the messages m_i should be ordered by sending time;
+     i is then the index into the list of all [m_i]
+ 5.) print out debug messages to stderr
+ 6.) different network failure scenarios!
+ 7.) ordering of messages: messages are in total order, by timestamps
+ 8.) submission execution periods (0-1, 1-2) from 0 to 1: messages are sent
+     from 1 to 2: no sendind, just receiving, calculation and printout
+     after 2: program is killed
+ 9.) the random generator should be seeded (from command line)
+10.) commmand line arguments:
+      --send-for k ; seconds of period 0-1
+      --wait-for l ; seconds of period 1-2
+      --with-seed mn ; seed for RNG
+      k, l, m in N
+11.) cluster configuration either in source or in configuration files:
+      node list
+12.) refer to task specification in README
+
+
+Problems
+========
+
+If all nodes continuously send out messages to all others and have to remember all other messages in an ordered way, we face a few problems.
+
+* open connections: n*(n-1)     ; if all-with-all are connected
+* broadcasting can be unreliable  ; UDP
+* sorting of incoming messages  ; memory reqs
+* the sending time is critical, but this would require a synchronized clock
+* ordering of the messages is total, that is not two messages are sent at
+  the same time                 ; how to enforce this in a distributed env?
+  ** this is expensive in an asynchronous, distributed setup
+  ** even if the clocks are synchronized among the nodes, it could be that
+     some tau(m) would be equal
+
+-> this would require a central clock node;
+   it could facilitate the tau function (additional n connections of every
+   node to the clock)
+-> and, this allows us to define a function index(m) which returns a
+   message's global index (from the central clock node)
+-> broadcast messaging: central queue which delivers each message to every
+   node (n connections)
+-> failure: the central node could fail and all the network halts. (single
+   point of failure)
+
+

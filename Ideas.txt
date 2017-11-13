@@ -1,0 +1,34 @@
+
+Cloud Haskell / OTP evaluation
+==============================
+
+Ideas
+=====
+
+[A] deterministic random numbers
+
+The final result is to print the tuple: count of messages, and their weighted sumproduct.
+Since the seeded random numbers are deterministic, every node can compute the desired result "lazily" if it knows the total number of messages that were sent in period 0-1.
+Thus, the problem can be reduced to generate that shared secret, or consensus.
+All nodes could burst sending out their maximum of received messages, plus one. In period 1-2 they just collect what others sent and keep the maximum index, while computing the sumproduct of the random numbers up to the maximum index.
+
+On failure of a node, there will be no output for this node.
+
+PROS: auto-organising, ordering of messages
+CONS: every node responds to every message, n*(n-1) connections or
+      unreliable broadcast, the message would look different than specd
+
+[B] ring architecture
+
+I could imagine a ring topology, in which every node is connected to one neighbour.
+
+-> ring messaging: every node knows its neighbour and passes the message on, unless it already knows it (n connections)
+-> failure: in the ring every node monitors its predecessor, when it fails it gets notified and sends a messages to the ring to inform that its prepredecessor has to reconnect to the monitoring node. (self healing)
+-> a node may send its own message if the clock `rem` (total count - 1) = node's number
+-> adding a node: just insert and send the new total count to the ring.
+-> if the node does not want to send a message, it sends an empty message to signal.
+-> the clock advances when a node sends a message
+
+PROS: auto-organising, monitored, self-healing, n connections
+CONS: latency
+

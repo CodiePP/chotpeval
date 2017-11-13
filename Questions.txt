@@ -1,0 +1,15 @@
+
+Cloud Haskell / OTP evaluation
+==============================
+
+Questions
+=========
+
+* where to deliver the output? locally on a node or returned to the
+  initiator?
+* total ordering of message timestamps is hard, does it require a central
+  node?
+* what are your wishes for the network architecture?
+* it could impose some cost to deal with failures, what are your
+  expectations?
+
