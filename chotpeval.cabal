@@ -15,11 +15,14 @@ cabal-version:       >=1.10
 
 library
   hs-source-dirs:      src
-  exposed-modules:     HC.Computation.SumProd
-                     , HC.Network.Master
-                     , HC.Network.Slave
+  exposed-modules:     HCOTP.Computation.SumProd
+                     , HCOTP.Data.Params
+                     , HCOTP.Network.Master
+                     , HCOTP.Network.Worker
   build-depends:       base >= 4.7 && < 5
                      , random
+                     , cmdargs
+                     , time
                      , distributed-process
                      , distributed-process-simplelocalnet
   default-language:    Haskell2010

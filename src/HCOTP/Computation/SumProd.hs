@@ -1,4 +1,4 @@
-module HC.Computation.SumProd
+module HCOTP.Computation.SumProd
   (
   sumprod
   )
