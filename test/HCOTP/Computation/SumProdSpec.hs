@@ -1,10 +1,10 @@
-module HC.Computation.SumProdSpec (main, spec) where
+module HCOTP.Computation.SumProdSpec (main, spec) where
 
 import Test.Hspec
 import Test.QuickCheck
 import System.Random
 
-import HC.Computation.SumProd (sumprod)
+import HCOTP.Computation.SumProd (sumprod)
 
 -- `main` is here so that this module can be run from GHCi on its own.  It is
 -- not needed for automatic spec discovery.
