@@ -17,10 +17,12 @@ library
   hs-source-dirs:      src
   exposed-modules:     HCOTP.Computation.SumProd
                      , HCOTP.Data.Params
-                     , HCOTP.Network.Master
+                     , HCOTP.Data.Time
+                     , HCOTP.Network.Controller
                      , HCOTP.Network.Worker
   build-depends:       base >= 4.7 && < 5
                      , random
+                     , binary
                      , cmdargs
                      , time
                      , distributed-process
