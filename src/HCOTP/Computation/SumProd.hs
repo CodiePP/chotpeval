@@ -4,15 +4,19 @@ module HCOTP.Computation.SumProd
   )
 where
 
-import System.Random
+import HCOTP.Computation.Random (get_random)
 
 
 sumprod :: Int -> IO Double
-sumprod 0 = return 0.0
-sumprod n = do
-  r <- randomRIO (0.0, 1.0)
-  x <- sumprod (n - 1)
-  return $ r * (fromIntegral n) + x
+sumprod n
+  | n == 0     = return 0.0
+  | otherwise = sumprod' (n + 1) 1 0.0
+
+sumprod' n k acc
+  | n == k     =  return acc
+  | otherwise = do
+      r <- get_random
+      sumprod' n (k+1) $ acc + r * (fromIntegral k)
 
 
 

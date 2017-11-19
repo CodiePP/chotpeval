@@ -41,6 +41,7 @@ import Control.Distributed.Process.Backend.SimpleLocalnet
 
 import HCOTP.Data.Params (Params(..))
 import HCOTP.Data.Time (waitfor)
+import HCOTP.Computation.Random (get_random)
 
 
 data Msg = Msg {idx :: Int, rnd :: Double, nid :: NodeId}
@@ -55,6 +56,10 @@ data State = State {lastidx :: Int, sump :: Double}
 
 startstate = State 0 0.0
 
+-- | debugging output - choose one
+debug_out _ = return ()
+--debug_out m = liftIO $ print m
+
 -- | send out a new message to the next node
 sendMessage :: (Binary a, Typeable a) => a -> Process ()
 sendMessage !msg =
@@ -62,7 +67,9 @@ sendMessage !msg =
 
 -- | compute next state
 newstate state@State{lastidx=lastidx, sump=sump} i r =
-  State i (sump + fromIntegral i * r)
+  if (lastidx == i - 1)
+     then State i (sump + fromIntegral i * r)
+     else state
 
 -- | register the listener on the previous node in the ring
 reglistener :: NodeId -> Process ()
@@ -79,20 +86,19 @@ reglistener node = do
 listener :: State -> Process ()
 listener state@State{lastidx=lastidx, sump=sump} = do
   mypid <- getSelfPid
-  -- liftIO $ putStrLn $ "listener pid = " ++ (show mypid)
   receiveWait [
-    --match (\(PrintOut) -> do {say $ "Finished with " ++ (show state)} )
-    --,
-    match (\StopSending -> collector state )
+    match (\StopSending -> collector state )   -- ^ pass state to collector
     ,
     match (\msg@(Msg i r node) -> do
         -- say $ "received #" ++ (show i) ++ " from " ++ (show node)
-        if i > lastidx + 1
-          then say $ "unexpected index in message: " ++ show i
-          else when (i > lastidx) $ sendMessage msg
-        when (node == processNodeId mypid) $ do
+        when (i > lastidx + 1) $ say $ "unexpected index in message: " ++ show i
+        if (node == processNodeId mypid)
+           then do
+             -- the message was sent by us, roll over
              r' <- liftIO get_random
              sendMessage $ Msg (i+1) r' node
+           else sendMessage msg
+        debug_out $ "listener  " ++ (show i) ++ " " ++ (show $ newstate state i r)
         listener $ newstate state i r )
     ]
 
@@ -100,22 +106,18 @@ listener state@State{lastidx=lastidx, sump=sump} = do
 collector :: State -> Process ()
 collector state@State{lastidx=lastidx, sump=sump} = do
   mypid <- getSelfPid
-  -- liftIO $ putStrLn $ "listener pid = " ++ (show mypid)
   receiveWait [
-    match (\PrintOut -> say $ "Finished with " ++ show state )
+    match (\PrintOut -> do
+        debug_out $ "Finished with " ++ show state
+        say $ "Finished with " ++ show state )
     ,
     match (\msg@(Msg i r node) -> do
         -- say $ "received #" ++ (show i) ++ " from " ++ (show node)
         when (i > lastidx + 1) $ say $ "unexpected index in message: " ++ show i
+        when (node /= processNodeId mypid) $ sendMessage msg
+        debug_out $ "collector " ++ (show i) ++ " " ++ (show $ newstate state i r)
         collector $ newstate state i r )
     ]
-
--- | get a random number in the interval (0,1] (by specification)
---
---   here: lower bounded by 1.0e-32
-get_random :: IO Double
-get_random =
-  getStdRandom (randomR (0.0, 1.0)) >>= \r -> return $ max 1.0e-32 r
 
 
 -- | closure accessible from remote
@@ -137,7 +139,7 @@ on_Worker (idx, node, srng, sendsecs, gracesecs) = do
   _ <- spawnLocal (do
             liftIO $ do
               waitfor sendUntil
-              putStrLn $ "... print ..." ++ show newpid
+              putStrLn $ "... stopping ..." ++ show newpid
             send newpid StopSending
           )
   -- print out result before being killed
