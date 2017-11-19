@@ -5,7 +5,7 @@ Copyright   : (c) 2017 Alexander Diemand
 License     : BSD-3
 Maintainer  : codieplusplus@apax.net
 Stability   : experimental
-Portability : POSIX
+Portability : GHC
 
 The @Worker@ is being called by the @Controller@.
 Every @Worker@ has a next instance to which it will send messages to.
@@ -30,6 +30,7 @@ where
 import Data.Binary (Binary)
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
+import Control.Monad (when)
 import System.Random
 import Data.Time (getCurrentTime, addUTCTime, UTCTime)
 import Control.Concurrent (threadDelay)
@@ -49,15 +50,19 @@ data PrintOut = PrintOut
 data StopSending = StopSending
                  deriving (Show, Typeable, Binary, Generic)
 
-data State = State {sending :: Bool, lastidx :: Int, sump :: Double}
+data State = State {lastidx :: Int, sump :: Double}
            deriving (Show, Typeable)
 
-startstate = State True 0 0.0
+startstate = State 0 0.0
 
 -- | send out a new message to the next node
-send_message :: (Binary a, Typeable a) => a -> Process ()
-send_message !msg = do
+sendMessage :: (Binary a, Typeable a) => a -> Process ()
+sendMessage !msg =
   nsend "nnext" msg
+
+-- | compute next state
+newstate state@State{lastidx=lastidx, sump=sump} i r =
+  State i (sump + fromIntegral i * r)
 
 -- | register the listener on the previous node in the ring
 reglistener :: NodeId -> Process ()
@@ -66,41 +71,51 @@ reglistener node = do
   -- register this process with prev node
   registerRemoteAsync node "nnext" newpid
   reply <- expect :: Process RegisterReply
-  liftIO $ putStrLn $ show reply
+  --liftIO $ putStrLn $ show reply
   -- start listener
   listener startstate
 
--- | listening for messages and reacting
+-- | listening for messages and sending
 listener :: State -> Process ()
-listener state@State{sending=sending, lastidx=lastidx, sump=sump} = do
+listener state@State{lastidx=lastidx, sump=sump} = do
   mypid <- getSelfPid
   -- liftIO $ putStrLn $ "listener pid = " ++ (show mypid)
   receiveWait [
-    match (\(PrintOut) -> do {say $ "Finished with " ++ (show state)} )
-    ,
-    match (\(StopSending) -> listener (State False lastidx sump) )
+    --match (\(PrintOut) -> do {say $ "Finished with " ++ (show state)} )
+    --,
+    match (\StopSending -> collector state )
     ,
     match (\msg@(Msg i r node) -> do
         -- say $ "received #" ++ (show i) ++ " from " ++ (show node)
-        if i > lastidx
-          then send_message msg
-          else return ()
-        if sending && node == processNodeId mypid
-          then do
+        if i > lastidx + 1
+          then say $ "unexpected index in message: " ++ show i
+          else when (i > lastidx) $ sendMessage msg
+        when (node == processNodeId mypid) $ do
              r' <- liftIO get_random
-             send_message $ Msg (i+1) r' node
-          else return ()
-        listener (State sending i ((fromIntegral i) * r)) )
+             sendMessage $ Msg (i+1) r' node
+        listener $ newstate state i r )
     ]
 
+-- | listening for messages and collecting (no sending)
+collector :: State -> Process ()
+collector state@State{lastidx=lastidx, sump=sump} = do
+  mypid <- getSelfPid
+  -- liftIO $ putStrLn $ "listener pid = " ++ (show mypid)
+  receiveWait [
+    match (\PrintOut -> say $ "Finished with " ++ show state )
+    ,
+    match (\msg@(Msg i r node) -> do
+        -- say $ "received #" ++ (show i) ++ " from " ++ (show node)
+        when (i > lastidx + 1) $ say $ "unexpected index in message: " ++ show i
+        collector $ newstate state i r )
+    ]
 
 -- | get a random number in the interval (0,1] (by specification)
 --
 --   here: lower bounded by 1.0e-32
---   TODO: make liquid constraint
 get_random :: IO Double
 get_random =
-  getStdRandom (randomR (0.0, 1.0)) >>= \r -> return $ max (1.0e-32) r
+  getStdRandom (randomR (0.0, 1.0)) >>= \r -> return $ max 1.0e-32 r
 
 
 -- | closure accessible from remote
@@ -135,17 +150,15 @@ on_Worker (idx, node, srng, sendsecs, gracesecs) = do
 
   -- receive and send messages
   liftIO $ threadDelay 100000  -- tenth of a second
-  say $ "waiting until " ++ (show waitUntil)
+  say $ "waiting until " ++ show waitUntil
 
   -- mypi <- getProcessInfo mypid
   -- liftIO $ putStrLn $ show mypi
 
   -- start clock with last added node
-  if idx == 0
-    then do
+  when (idx == 0) $ do
        r <- liftIO get_random
-       send_message $ Msg 1 r (processNodeId mypid)
-    else return ()
+       sendMessage $ Msg 1 r (processNodeId mypid)
 
 
 remotable ['on_Worker]
@@ -157,6 +170,7 @@ onWorker args = $(mkClosure 'on_Worker) args
 
 
 -- | startup entry point
+runWorker :: Params -> IO ()
 runWorker ps@Worker {host=h, port=p} = do
   backend <- initializeBackend h p myRemoteTable
   startSlave backend

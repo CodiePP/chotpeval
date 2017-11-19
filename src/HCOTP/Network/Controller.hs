@@ -5,9 +5,9 @@ Copyright   : (c) 2017 Alexander Diemand
 License     : BSD-3
 Maintainer  : codieplusplus@apax.net
 Stability   : experimental
-Portability : POSIX
+Portability : GHC
 
-The @Controller@ sets up the network by connecting nodes.
+The "Controller" sets up the network by connecting nodes, actually "Worker"s.
 Then, initiates the computation.
 
 -}
@@ -32,7 +32,7 @@ import HCOTP.Network.Worker (onWorker, myRemoteTable)
 
 -- | program for the controller
 controller :: Params -> Backend -> [NodeId] -> Process ()
-controller ps@Controller {with_seed=srng, send_for=sf, wait_for=wf} backend ws = do
+controller ps@Controller {with_seed=srng, send_for=sf, wait_for=wf} backend ws =
   if length ws > 1
   then do
        liftIO . putStrLn $ "Workers: " ++ show ws
@@ -46,7 +46,7 @@ controller ps@Controller {with_seed=srng, send_for=sf, wait_for=wf} backend ws =
        liftIO $ waitfor waitUntil
        liftIO . putStrLn $ "finishing .."
        terminateAllSlaves backend
-  else do
+  else
        liftIO . putStrLn $ "not enough workers!"
 
 
@@ -59,15 +59,6 @@ setupNodes ws srng sf wf = do
     liftIO . putStrLn $ show n2 ++ " -> " ++ show n1
     spawn n1 $ onWorker (count - idx, n2, srng, sf, wf)
     --spawn n1 $ $(mkClosure 'onWorker) (n2, srng, sf, wf)
-
--- waitfor :: UTCTime -> Process ()
--- waitfor tm = do
---   now <- liftIO getCurrentTime
---   if now >= tm
---   then return ()
---   else do
---        liftIO $ threadDelay 1000000
---        waitfor tm
 
 
 -- | entry point

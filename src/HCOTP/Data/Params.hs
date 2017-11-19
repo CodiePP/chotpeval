@@ -5,10 +5,10 @@ Copyright   : (c) 2017 Alexander Diemand
 License     : BSD-3
 Maintainer  : codieplusplus@apax.net
 Stability   : experimental
-Portability : POSIX
+Portability : GHC
 
 The program accepts parameters on the command line for
-the @Worker@s or the main @Controller@.
+the "Worker"s or the main "Controller".
 
 -}
 
@@ -25,14 +25,16 @@ import System.Console.CmdArgs
 
 -- | parameters for controller and workers
 data Params = Controller {
-                host :: String,
-                port :: String,
-                send_for :: Int,
-                wait_for :: Int,
-                with_seed :: Int }
+                host :: String,       -- ^ hostname
+                port :: String,       -- ^ port number or service name
+                send_for :: Int,      -- ^ seconds
+                wait_for :: Int,      -- ^ seconds
+                with_seed :: Int      -- ^ seeding the random number generator
+                }
               | Worker {
-                host :: String,
-                port :: String }
+                host :: String,       -- ^ hostname
+                port :: String        -- ^ port number or service name
+                }
             deriving (Data,Typeable,Show,Eq)
 
 

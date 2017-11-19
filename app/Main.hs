@@ -5,7 +5,7 @@ Copyright   : (c) 2017 Alexander Diemand
 License     : BSD-3
 Maintainer  : codieplusplus@apax.net
 Stability   : experimental
-Portability : POSIX
+Portability : GHC
 
 This programm will dispatch a massive distributed computation
 on a cluster of loosely coupled instances.
@@ -29,7 +29,11 @@ in the network.
 
 -}
 
-module Main where
+module Main
+  (
+    main
+  )
+where
 
 import System.Environment (getArgs)
 import System.Random
@@ -37,7 +41,6 @@ import System.Console.CmdArgs
 import HCOTP.Data.Params (Params(..))
 import HCOTP.Network.Controller (runController)
 import HCOTP.Network.Worker (runWorker)
-import HCOTP.Computation.SumProd (sumprod)
 
 
 -- | command line descriptions
@@ -64,21 +67,13 @@ mode =
 main :: IO ()
 main = do
 
-
+  -- parse arguments
   ps <- cmdArgsRun mode
   putStrLn $ show ps
 
+  -- run either controller or worker
   case ps of
-     Worker{host=host, port=port} -> runWorker ps --host port
-     Controller{host=host, port=port} -> runController ps --host port
-     _ -> putStrLn $ show mode
+     Worker{host=host, port=port} -> runWorker ps
+     Controller{host=host, port=port} -> runController ps
 
-  --showSomeSumProd
-
-
--- | evaluate and print a sumproduct of 42 random numbers
-showSomeSumProd = do
-  setStdGen $ mkStdGen 42
-  sumx <- sumprod 42
-  putStrLn $ show $ sumx
 

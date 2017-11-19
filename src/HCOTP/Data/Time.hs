@@ -5,7 +5,7 @@ Copyright   : (c) 2017 Alexander Diemand
 License     : BSD-3
 Maintainer  : codieplusplus@apax.net
 Stability   : experimental
-Portability : POSIX
+Portability : GHC
 
 -}
 
@@ -15,6 +15,7 @@ module HCOTP.Data.Time
   )
 where
 
+import Control.Monad (when)
 import Data.Time (getCurrentTime, UTCTime)
 import Control.Concurrent (threadDelay)
 import Control.Distributed.Process
@@ -23,9 +24,7 @@ import Control.Distributed.Process
 waitfor :: UTCTime -> IO ()
 waitfor tm = do
     now <- liftIO getCurrentTime
-    if now >= tm
-    then return ()
-    else do
+    when (now < tm) $ do
         liftIO $ threadDelay 100000 -- adjust resolution
         waitfor tm
 
