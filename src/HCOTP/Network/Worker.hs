@@ -13,11 +13,11 @@ This leads to a ring architecture.
 
 -}
 
+{-# LANGUAGE BangPatterns       #-}
+{-# LANGUAGE DeriveAnyClass     #-}
 {-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DeriveGeneric      #-}
+{-# LANGUAGE TemplateHaskell    #-}
 
 module HCOTP.Network.Worker
   (
@@ -66,45 +66,59 @@ sendMessage !msg =
   nsend "nnext" msg
 
 -- | compute next state
-newstate state@State{lastidx=lastidx, sump=sump} i r =
+newstate !state@State{lastidx=lastidx, sump=sump} !i !r =
   if (lastidx == i - 1)
      then State i (sump + fromIntegral i * r)
      else state
 
 -- | register the listener on the previous node in the ring
-reglistener :: NodeId -> Process ()
-reglistener node = do
+reglistener :: Int -> NodeId -> Process ()
+reglistener nidx node = do
   newpid <- getSelfPid
   -- register this process with prev node
   registerRemoteAsync node "nnext" newpid
   reply <- expect :: Process RegisterReply
   --liftIO $ putStrLn $ show reply
   -- start listener
-  listener startstate
+  listener nidx startstate
+
+
+msghandler !nidx !state@State{lastidx=lastidx, sump=sump} !msg@(Msg i r node)
+  | lastidx > i =  return state   -- ignore
+  | lastidx == i =   do
+        mypid <- getSelfPid
+        nws <- if (processNodeId mypid == node)
+               then do
+                  -- increase clock and send new message
+                  r' <- liftIO get_random
+                  sendMessage $ Msg (i+1) r' node
+                  return $ newstate state (i+1) r'
+               else do
+                  sendMessage msg -- pass to next node
+                  return state
+        return nws
+  | lastidx <= i - 1 = do
+        sendMessage msg -- pass to next node
+        return $ newstate state i r
+  | otherwise = do
+        liftIO $ print $ "unexpected id received: " ++ show i
+        return state
 
 -- | listening for messages and sending
-listener :: State -> Process ()
-listener state@State{lastidx=lastidx, sump=sump} = do
+listener :: Int -> State -> Process ()
+listener !nidx !state = do
   mypid <- getSelfPid
   receiveWait [
     match (\StopSending -> collector state )   -- ^ pass state to collector
     ,
     match (\msg@(Msg i r node) -> do
-        -- say $ "received #" ++ (show i) ++ " from " ++ (show node)
-        when (i > lastidx + 1) $ say $ "unexpected index in message: " ++ show i
-        if (node == processNodeId mypid)
-           then do
-             -- the message was sent by us, roll over
-             r' <- liftIO get_random
-             sendMessage $ Msg (i+1) r' node
-           else sendMessage msg
-        debug_out $ "listener  " ++ (show i) ++ " " ++ (show $ newstate state i r)
-        listener $ newstate state i r )
+      newstate' <- msghandler nidx state msg
+      listener nidx newstate' )
     ]
 
 -- | listening for messages and collecting (no sending)
 collector :: State -> Process ()
-collector state@State{lastidx=lastidx, sump=sump} = do
+collector !state@State{lastidx=lastidx, sump=sump} = do
   mypid <- getSelfPid
   receiveWait [
     match (\PrintOut -> do
@@ -113,8 +127,8 @@ collector state@State{lastidx=lastidx, sump=sump} = do
     ,
     match (\msg@(Msg i r node) -> do
         -- say $ "received #" ++ (show i) ++ " from " ++ (show node)
-        when (i > lastidx + 1) $ say $ "unexpected index in message: " ++ show i
-        when (node /= processNodeId mypid) $ sendMessage msg
+        --when (i > lastidx + 1) $ say $ "unexpected index in message: " ++ show i
+        when (node /= processNodeId mypid) $ sendMessage msg   -- pass to next node
         debug_out $ "collector " ++ (show i) ++ " " ++ (show $ newstate state i r)
         collector $ newstate state i r )
     ]
@@ -133,7 +147,7 @@ on_Worker (idx, node, srng, sendsecs, gracesecs) = do
       waitUntil = addUTCTime (fromIntegral (sendsecs + gracesecs) - 0.3) now
 
   -- start process, connect to next node
-  newpid <- spawnLocal (reglistener node)
+  newpid <- spawnLocal (reglistener idx node)
 
   -- stop sending messages after this time
   _ <- spawnLocal (do
