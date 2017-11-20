@@ -21,6 +21,7 @@ library
                      , HCOTP.Data.Time
                      , HCOTP.Network.Controller
                      , HCOTP.Network.Worker
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N -O
   build-depends:       base >= 4.7 && < 5
                      , random
                      , binary
@@ -33,7 +34,7 @@ library
 executable chotpeval
   hs-source-dirs:      app
   main-is:             Main.hs
-  ghc-options:         -threaded -rtsopts -with-rtsopts=-N
+  ghc-options:         -threaded -rtsopts -with-rtsopts=-N -O
   build-depends:       base
                      , random
                      , cmdargs
