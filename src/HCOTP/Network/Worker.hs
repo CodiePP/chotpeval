@@ -33,7 +33,7 @@ import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
 import Control.Monad (when)
 import System.Random
-import Data.Time (getCurrentTime, addUTCTime, UTCTime)
+import Data.Time (getCurrentTime, addUTCTime)
 import Control.Concurrent (threadDelay)
 import Control.Distributed.Process
 import Control.Distributed.Process.Closure (mkClosure, remotable)
@@ -53,11 +53,17 @@ data StopSending = StopSending
                  deriving (Show, Typeable, Binary, Generic)
 
 data State = State {lastidx :: Int, sump :: Double}
-           deriving (Show, Typeable)
+           deriving (Typeable)
 
+instance Show State where
+  show State {lastidx=lastidx, sump=sump} =
+    "<" ++ (show lastidx) ++ ", " ++ (show sump) ++ ">"
+
+startstate :: State
 startstate = State 0 0.0
 
 -- | debugging output - choose one
+debug_out :: String -> Process ()
 debug_out _ = return ()
 --debug_out m = liftIO $ print m
 
@@ -73,6 +79,7 @@ sendMessage !msg =
   nsend "nnext" msg
 
 -- | compute next state
+newstate :: State -> Int -> Double -> State
 newstate !state@State{lastidx=lastidx, sump=sump} !i !r =
   if (lastidx == i - 1)
      then State i (sump + fromIntegral i * r)
@@ -90,36 +97,54 @@ reglistener nidx node = do
   listener nidx startstate
 
 
-msghandler !nidx !state@State{lastidx=lastidx, sump=sump} !msg@(Msg i r node)
-  | lastidx > i =  return state   -- ignore
+-- | action defines our reaction to incoming messages
+data Action = Ignore State
+            | PassOnly Msg State
+            | PassUpdate Msg State
+            | SendNew Int State
+
+-- | compute next action
+computeAction :: Int -> State -> Msg -> Process Action
+computeAction !nidx !state@State{lastidx=lastidx, sump=sump} !msg@(Msg i r node)
+  | lastidx > i =  return $ Ignore state
   | lastidx == i =   do
         mypid <- getSelfPid
         nws <- if (processNodeId mypid == node)
                then do
                   -- increase clock and send new message
-                  r' <- liftIO mkrandom
-                  sendMessage $ Msg (i+1) r' node
-                  return $ newstate state (i+1) r'
+                  return $ SendNew (i+1) state
                else do
-                  sendMessage msg -- pass to next node
-                  return state
+                  return $ PassOnly msg state
         return nws
   | lastidx <= i - 1 = do
-        sendMessage msg -- pass to next node
-        return $ newstate state i r
+        return $ PassUpdate msg state
   | otherwise = do
         liftIO $ print $ "unexpected id received: " ++ show i
-        return state
+        return $ Ignore state
+
+-- | apply an action and compute next state
+applyAction :: Action -> Process State
+applyAction (Ignore s) = return s
+applyAction (PassOnly m s) = do
+  sendMessage m
+  return s
+applyAction (PassUpdate m@(Msg i r node) s) = do
+  sendMessage m
+  return $ newstate s i r
+applyAction (SendNew j s) = do
+  mypid <- getSelfPid
+  r <- liftIO mkrandom
+  sendMessage $ Msg j r (processNodeId mypid)
+  return $ newstate s j r
 
 -- | listening for messages and sending
 listener :: Int -> State -> Process ()
 listener !nidx !state = do
-  mypid <- getSelfPid
   receiveWait [
     match (\StopSending -> collector state )   -- pass state to collector
     ,
-    match (\msg@(Msg i r node) -> do
-      newstate' <- msghandler nidx state msg
+    match (\msg@(Msg {}) -> do
+      newstate' <- (computeAction nidx state msg >>= applyAction)
       listener nidx newstate' )
     ]
 
@@ -134,7 +159,6 @@ collector !state@State{lastidx=lastidx, sump=sump} = do
     ,
     match (\msg@(Msg i r node) -> do
         -- say $ "received #" ++ (show i) ++ " from " ++ (show node)
-        --when (i > lastidx + 1) $ say $ "unexpected index in message: " ++ show i
         when (node /= processNodeId mypid) $ sendMessage msg   -- pass to next node
         debug_out $ "collector " ++ (show i) ++ " " ++ (show $ newstate state i r)
         collector $ newstate state i r )
@@ -195,9 +219,9 @@ onWorker args = $(mkClosure 'on_Worker) args
 -- | startup entry point.
 --   LiquidHaskell checks for totality.
 runWorker :: Params -> IO ()
-runWorker ps@Worker {host=h, port=p} = do
+runWorker Worker {host=h, port=p} = do
   backend <- initializeBackend h p myRemoteTable
   startSlave backend
-runWorker ps@Controller{} = do
+runWorker Controller{} = do
   liftIO $ print "was called with wrong type of parameters!"
 

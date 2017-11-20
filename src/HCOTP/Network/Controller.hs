@@ -21,9 +21,7 @@ module HCOTP.Network.Controller
 where
 
 import Control.Monad (forM_)
-import Data.Time (getCurrentTime, addUTCTime, UTCTime)
---import Data.Binary
-import Control.Concurrent (threadDelay)
+import Data.Time (getCurrentTime, addUTCTime)
 import Control.Distributed.Process
 import Control.Distributed.Process.Backend.SimpleLocalnet
 
@@ -35,18 +33,16 @@ import HCOTP.Network.Worker (onWorker, myRemoteTable)
 -- | program for the controller
 --   LiquidHaskell checks for totality.
 controller :: Params -> Backend -> [NodeId] -> Process ()
-controller ps@Worker {} backend ws = return ()   -- not my business
-controller ps@Controller {with_seed=srng, send_for=sf, wait_for=wf} backend ws =
+controller Worker {} _ _ = return ()   -- not my business
+controller Controller {with_seed=srng, send_for=sf, wait_for=wf} backend ws =
   if length ws > 1
   then do
        liftIO . putStrLn $ "Workers: " ++ show ws
        liftIO . putStrLn $ "setup .."
        setupNodes ws srng sf wf
        liftIO . putStrLn $ "waiting .."
-      --  liftIO $ threadDelay 100000  -- tenth of a second
        now <- liftIO getCurrentTime
-       let sendUntil = addUTCTime (fromIntegral sf) now
-           waitUntil = addUTCTime (fromIntegral (sf + wf)) now
+       let waitUntil = addUTCTime (fromIntegral (sf + wf)) now
        liftIO $ waitfor waitUntil
        liftIO . putStrLn $ "finishing .."
        terminateAllSlaves backend
@@ -71,5 +67,5 @@ runController :: Params -> IO ()
 runController ps@Controller {host=h, port=p} = do
   backend <- initializeBackend h p myRemoteTable
   startMaster backend (controller ps backend)
-runController ps@Worker{} = do
+runController Worker{} = do
   liftIO $ print "was called with wrong type of parameters!"
