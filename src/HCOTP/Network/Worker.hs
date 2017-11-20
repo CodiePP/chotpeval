@@ -109,7 +109,7 @@ listener :: Int -> State -> Process ()
 listener !nidx !state = do
   mypid <- getSelfPid
   receiveWait [
-    match (\StopSending -> collector state )   -- ^ pass state to collector
+    match (\StopSending -> collector state )   -- pass state to collector
     ,
     match (\msg@(Msg i r node) -> do
       newstate' <- msghandler nidx state msg
