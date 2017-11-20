@@ -12,6 +12,8 @@ Then, initiates the computation.
 
 -}
 
+{-# OPTIONS_HADDOCK ignore-exports #-}
+
 module HCOTP.Network.Controller
   (
     runController
@@ -31,7 +33,9 @@ import HCOTP.Network.Worker (onWorker, myRemoteTable)
 
 
 -- | program for the controller
+--   LiquidHaskell checks for totality.
 controller :: Params -> Backend -> [NodeId] -> Process ()
+controller ps@Worker {} backend ws = return ()   -- not my business
 controller ps@Controller {with_seed=srng, send_for=sf, wait_for=wf} backend ws =
   if length ws > 1
   then do
@@ -61,9 +65,11 @@ setupNodes ws srng sf wf = do
     --spawn n1 $ $(mkClosure 'onWorker) (n2, srng, sf, wf)
 
 
--- | entry point
+-- | entry point.
+--   LiquidHaskell checks for totality.
 runController :: Params -> IO ()
 runController ps@Controller {host=h, port=p} = do
-      backend <- initializeBackend h p myRemoteTable
-      startMaster backend (controller ps backend)
-
+  backend <- initializeBackend h p myRemoteTable
+  startMaster backend (controller ps backend)
+runController ps@Worker{} = do
+  liftIO $ print "was called with wrong type of parameters!"

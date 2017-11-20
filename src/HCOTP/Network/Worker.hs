@@ -13,6 +13,7 @@ This leads to a ring architecture.
 
 -}
 
+{-# OPTIONS_HADDOCK ignore-exports #-}
 {-# LANGUAGE BangPatterns       #-}
 {-# LANGUAGE DeriveAnyClass     #-}
 {-# LANGUAGE DeriveDataTypeable #-}
@@ -41,7 +42,7 @@ import Control.Distributed.Process.Backend.SimpleLocalnet
 
 import HCOTP.Data.Params (Params(..))
 import HCOTP.Data.Time (waitfor)
-import HCOTP.Computation.Random (get_random)
+import HCOTP.Computation.Random (get_random_k)
 
 
 data Msg = Msg {idx :: Int, rnd :: Double, nid :: NodeId}
@@ -59,6 +60,12 @@ startstate = State 0 0.0
 -- | debugging output - choose one
 debug_out _ = return ()
 --debug_out m = liftIO $ print m
+
+
+-- | make a random number in the range (0,1]
+mkrandom :: IO Double
+mkrandom = do
+  get_random_k >>= (\v -> return ((fromIntegral v) / 1000.0))
 
 -- | send out a new message to the next node
 sendMessage :: (Binary a, Typeable a) => a -> Process ()
@@ -90,7 +97,7 @@ msghandler !nidx !state@State{lastidx=lastidx, sump=sump} !msg@(Msg i r node)
         nws <- if (processNodeId mypid == node)
                then do
                   -- increase clock and send new message
-                  r' <- liftIO get_random
+                  r' <- liftIO mkrandom
                   sendMessage $ Msg (i+1) r' node
                   return $ newstate state (i+1) r'
                else do
@@ -173,7 +180,7 @@ on_Worker (idx, node, srng, sendsecs, gracesecs) = do
 
   -- start clock with last added node
   when (idx == 0) $ do
-       r <- liftIO get_random
+       r <- liftIO mkrandom
        sendMessage $ Msg 1 r (processNodeId mypid)
 
 
@@ -185,9 +192,12 @@ myRemoteTable = __remoteTable initRemoteTable
 onWorker args = $(mkClosure 'on_Worker) args
 
 
--- | startup entry point
+-- | startup entry point.
+--   LiquidHaskell checks for totality.
 runWorker :: Params -> IO ()
 runWorker ps@Worker {host=h, port=p} = do
   backend <- initializeBackend h p myRemoteTable
   startSlave backend
+runWorker ps@Controller{} = do
+  liftIO $ print "was called with wrong type of parameters!"
 
