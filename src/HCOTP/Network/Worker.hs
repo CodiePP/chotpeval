@@ -42,7 +42,7 @@ import Control.Distributed.Process.Backend.SimpleLocalnet
 
 import HCOTP.Data.Params (Params(..))
 import HCOTP.Data.Time (waitfor)
-import HCOTP.Computation.Random (get_random_k)
+import HCOTP.Computation.Random (get_random)
 
 
 data Msg = Msg {idx :: Int, rnd :: Double, nid :: NodeId}
@@ -70,8 +70,8 @@ debug_out _ = return ()
 
 -- | make a random number in the range (0,1]
 mkrandom :: IO Double
-mkrandom = do
-  get_random_k >>= (\v -> return ((fromIntegral v) / 1000.0))
+mkrandom = get_random
+  --get_random_k >>= (\v -> return ((fromIntegral v) / 1000.0))
 
 -- | send out a new message to the next node
 sendMessage :: (Binary a, Typeable a) => a -> Process ()

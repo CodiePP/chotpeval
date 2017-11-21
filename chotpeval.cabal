@@ -21,7 +21,7 @@ library
                      , HCOTP.Data.Time
                      , HCOTP.Network.Controller
                      , HCOTP.Network.Worker
-  ghc-options:         -O2 -Wall
+  ghc-options:         -O2
   build-depends:       base >= 4.7 && < 5
                      , random
                      , binary

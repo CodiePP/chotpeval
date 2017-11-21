@@ -6,7 +6,7 @@ module HCOTP.Computation.SumProd
        )
 where
 
-import HCOTP.Computation.Random (get_random_k)
+import HCOTP.Computation.Random (get_random)
 
 
 -- | iteratively generate random numbers and multiply them with their index.
@@ -20,12 +20,6 @@ sumprod n
 sumprod' n k acc
   | n == k     =  return acc
   | otherwise = do
-      --r <- get_random_k >>= (\v -> return ((fromIntegral v) / 1000.0) )
-      r <- mkrandom
+      r <- get_random
       sumprod' n (k+1) $ acc + r * (fromIntegral k)
-
--- | make a random number in the range (0,1]
-mkrandom :: IO Double
-mkrandom = do
-  get_random_k >>= (\v -> return ((fromIntegral v) / 1000.0))
 
