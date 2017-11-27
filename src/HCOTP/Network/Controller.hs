@@ -22,7 +22,6 @@ module HCOTP.Network.Controller
 where
 
 import Control.Monad (forM_)
-import Data.Time (getCurrentTime, addUTCTime)
 import Control.Distributed.Process
 import Control.Distributed.Process.Backend.SimpleLocalnet
 
@@ -46,9 +45,7 @@ controller Controller {with_seed=srng, send_for=sf, wait_for=wf} backend ws@(_:_
        liftIO . putStrLn $ "setup .."
        setupNodes ws srng sf wf
        liftIO . putStrLn $ "waiting .."
-       now <- liftIO getCurrentTime
-       let waitUntil = addUTCTime (fromIntegral (sf + wf)) now
-       liftIO $ waitfor waitUntil
+       liftIO $ waitfor (fromIntegral (sf + wf))
        liftIO . putStrLn $ "finishing .."
        terminateAllSlaves backend
 

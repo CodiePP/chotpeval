@@ -28,6 +28,7 @@ module HCOTP.Network.Worker
   )
 where
 
+--import Debug.Trace (trace)
 import Data.Binary (Binary)
 import Data.Typeable (Typeable)
 import GHC.Generics (Generic)
@@ -45,13 +46,21 @@ import HCOTP.Data.Time (waitfor)
 import HCOTP.Computation.Random (get_random)
 
 
-data Msg = Msg {idx :: Int, rnd :: Double, nid :: NodeId}
+-- | work definition
+data Msg = Msg {idx :: Int, rnd :: Double, pid :: ProcessId}
          deriving (Show, Typeable, Binary, Generic)
-data PrintOut = PrintOut
-              deriving (Show, Typeable, Binary, Generic)
-data StopSending = StopSending
-                 deriving (Show, Typeable, Binary, Generic)
 
+-- | messages that go over the wire
+data Starting = Starting    -- ^ start signal
+           deriving (Show, Typeable, Binary, Generic)
+data PrintOut = PrintOut    -- ^ signal printing of result
+              deriving (Show, Typeable, Binary, Generic)
+data StopSending = StopSending  -- ^ stop sending new message, just collect
+                 deriving (Show, Typeable, Binary, Generic)
+data MsgList = Nil | Cons Msg MsgList  -- ^ we send a list of messages in each communication
+             deriving (Show, Typeable, Binary, Generic)
+
+-- | the internal state
 data State = State {lastidx :: Int, sump :: Double}
            deriving (Typeable)
 
@@ -71,19 +80,30 @@ debug_out _ = return ()
 -- | make a random number in the range (0,1]
 mkrandom :: IO Double
 mkrandom = get_random
-  --get_random_k >>= (\v -> return ((fromIntegral v) / 1000.0))
 
 -- | send out a new message to the next node
-sendMessage :: (Binary a, Typeable a) => a -> Process ()
-sendMessage !msg =
+sendMessage :: (Show a, Binary a, Typeable a) => a -> Process ()
+sendMessage !msg = --do
   nsend "nnext" msg
 
--- | compute next state
-newstate :: State -> Int -> Double -> State
-newstate !state@State{lastidx=lastidx, sump=sump} !i !r =
-  if (lastidx == i - 1)
-     then State i (sump + fromIntegral i * r)
-     else state
+-- | compute new state
+newstate :: State -> MsgList -> Process State
+newstate state@State{lastidx=lastidx, sump=sump} ms = do
+  (idx', sump') <- accum ms (lastidx, sump)
+  return $ State idx' sump'
+    where accum :: MsgList -> (Int, Double) -> Process (Int, Double)
+          accum Nil (i0, p0) = return (i0, p0)
+          accum (Cons (Msg i r _) Nil) (i0, p0) = calcst p0 i r
+          accum (Cons (Msg i r _) mgs) (i0, p0) = calcst p0 i r >>= accum mgs
+          calcst :: Double -> Int -> Double -> Process (Int, Double)
+          calcst p0 i r =
+            return (i, p0 + fromIntegral i * r)
+
+nextMessage :: Int -> Process Msg
+nextMessage idx = do
+  mypid <- getSelfPid
+  r <- liftIO mkrandom
+  return $ Msg (idx+1) r mypid
 
 -- | register the listener on the previous node in the ring
 reglistener :: Int -> NodeId -> Process ()
@@ -92,120 +112,146 @@ reglistener nidx node = do
   -- register this process with prev node
   registerRemoteAsync node "nnext" newpid
   reply <- expect :: Process RegisterReply
-  --liftIO $ putStrLn $ show reply
+  liftIO $ putStrLn $ show reply
   -- start listener
-  listener nidx startstate
+  listener {-nidx-} startstate
 
+
+-- | helper functions for MsgList
+excludemine :: ProcessId -> MsgList -> MsgList
+excludemine _ Nil = Nil
+excludemine mypid (Cons m@(Msg _ _ pid) mgs)
+            | pid == mypid = excludemine mypid mgs
+            | otherwise = Cons m (excludemine mypid mgs)
+
+append :: MsgList -> Msg -> MsgList
+append Nil _ = Nil
+append (Cons m0 Nil) m = Cons m0 (Cons m Nil)
+append (Cons m0 ms) m = Cons m0 (append ms m)
 
 -- | action defines our reaction to incoming messages
 data Action = Ignore State
-            | PassOnly Msg State
-            | PassUpdate Msg State
-            | SendNew Int State
+            | PassUpdate MsgList State
+            | Start
 
 -- | compute next action
-computeAction :: Int -> State -> Msg -> Process Action
-computeAction !nidx !state@State{lastidx=lastidx, sump=sump} !msg@(Msg i r node)
-  | lastidx > i =  return $ Ignore state
-  | lastidx == i =   do
-        mypid <- getSelfPid
-        nws <- if (processNodeId mypid == node)
-               then do
-                  -- increase clock and send new message
-                  return $ SendNew (i+1) state
-               else do
-                  return $ PassOnly msg state
-        return nws
-  | lastidx <= i - 1 = do
-        return $ PassUpdate msg state
-  | otherwise = do
-        liftIO $ print $ "unexpected id received: " ++ show i
-        return $ Ignore state
+computeAction :: State -> MsgList -> Process Action
+computeAction state Nil = return $ Ignore state
+computeAction state ms = do
+  mypid <- getSelfPid
+  let ms' = excludemine mypid ms
+  return $ PassUpdate ms' state
 
 -- | apply an action and compute next state
 applyAction :: Action -> Process State
 applyAction (Ignore s) = return s
-applyAction (PassOnly m s) = do
-  sendMessage m
-  return s
-applyAction (PassUpdate m@(Msg i r node) s) = do
-  sendMessage m
-  return $ newstate s i r
-applyAction (SendNew j s) = do
-  mypid <- getSelfPid
-  r <- liftIO mkrandom
-  sendMessage $ Msg j r (processNodeId mypid)
-  return $ newstate s j r
+applyAction Start = do
+  m <- nextMessage 0
+  sendMessage $ Cons m Nil
+  newstate startstate (Cons m Nil)
+applyAction (PassUpdate ms s) = do
+  s'@(State idx sump) <- newstate s ms
+  -- update the random number generator
+  mapM_ (\_ -> liftIO mkrandom) [(1 + lastidx s) .. idx]
+  m <- nextMessage idx
+  sendMessage $ append ms m
+  newstate s' (Cons m Nil)
+
+-- | each "Worker" is in one of two states:
+--   either as "listener" for incoming messages, processing them and sending it off to the next ode
+--   and adding a new message to it.
+--
+--   or, as "collector" reacting to incoming messages, just processing them
 
 -- | listening for messages and sending
-listener :: Int -> State -> Process ()
-listener !nidx !state = do
+listener :: State -> Process ()
+listener state = do
   receiveWait [
-    match (\StopSending -> collector state )   -- pass state to collector
+    match (\StopSending -> do
+      -- switching state from listener to collector
+      debug_out $ "switching to collector!"
+      sendMessage StopSending  -- pass message to next node
+      collector state )   -- pass state to collector
     ,
-    match (\msg@(Msg {}) -> do
-      newstate' <- (computeAction nidx state msg >>= applyAction)
-      listener nidx newstate' )
+    match (\msgs@(Cons _ _) -> do
+      -- given message and state, compute and apply action, return new state
+      state' <- (computeAction state msgs >>= applyAction)
+      listener state' )
+    ,
+    match (\Starting -> do
+      state' <- applyAction Start
+      listener state' )
     ]
 
 -- | listening for messages and collecting (no sending)
 collector :: State -> Process ()
-collector !state@State{lastidx=lastidx, sump=sump} = do
+collector state@State{lastidx=lastidx, sump=sump} = do
   mypid <- getSelfPid
   receiveWait [
     match (\PrintOut -> do
-        debug_out $ "Finished with " ++ show state
+        --debug_out $ "Finished with " ++ show state
         say $ "Finished with " ++ show state )
     ,
-    match (\msg@(Msg i r node) -> do
-        -- say $ "received #" ++ (show i) ++ " from " ++ (show node)
-        when (node /= processNodeId mypid) $ sendMessage msg   -- pass to next node
-        debug_out $ "collector " ++ (show i) ++ " " ++ (show $ newstate state i r)
-        collector $ newstate state i r )
+    match (\msgs@(Cons _ _) -> do
+        --debug_out $ "collector " ++ (show msgs)
+        let ms' = excludemine mypid msgs
+        case ms' of
+          Nil -> collector state
+          _   -> do
+                   sendMessage ms'
+                   state' <- newstate state ms'
+                   collector state'
+        )
     ]
 
 
 -- | closure accessible from remote
 on_Worker :: (Int, NodeId, Int, Int, Int) -> Process ()
-on_Worker (idx, node, srng, sendsecs, gracesecs) = do
-  mypid <- getSelfPid
+on_Worker (nidx, node, srng, sendsecs, gracesecs) = do
+  --mypid <- getSelfPid
 
   -- set random number generator seed
   liftIO $ setStdGen $ mkStdGen srng
 
-  now <- liftIO getCurrentTime
-  let sendUntil = addUTCTime (fromIntegral sendsecs) now
-      waitUntil = addUTCTime (fromIntegral (sendsecs + gracesecs) - 0.3) now
+  --now <- liftIO getCurrentTime
+  --let sendUntil = addUTCTime (fromIntegral sendsecs) now
+  --    waitUntil = addUTCTime ((fromIntegral (sendsecs + gracesecs)) - 0.5) now
+  let sendUntil = fromIntegral sendsecs
+      waitUntil = fromIntegral (sendsecs + gracesecs) - 0.5
 
   -- start process, connect to next node
-  newpid <- spawnLocal (reglistener idx node)
+  newpid <- spawnLocal (reglistener nidx node)
 
   -- stop sending messages after this time
   _ <- spawnLocal (do
             liftIO $ do
               waitfor sendUntil
-              putStrLn $ "... stopping ..." ++ show newpid
+              now <- liftIO getCurrentTime
+              putStrLn $ show now ++ " ... stopping ... " ++ show newpid
             send newpid StopSending
           )
   -- print out result before being killed
   _ <- spawnLocal (do
             liftIO $ do
               waitfor waitUntil
-              putStrLn $ "... print ..." ++ show newpid
+              now <- liftIO getCurrentTime
+              putStrLn $ show now ++ " ... print ... " ++ show newpid
             send newpid PrintOut
           )
 
   -- receive and send messages
   liftIO $ threadDelay 100000  -- tenth of a second
-  say $ "waiting until " ++ show waitUntil
+  liftIO $ do
+    now <- liftIO getCurrentTime
+    putStrLn $ show now ++ " ... starting ... " ++ show newpid
+  say $ "waiting seconds: " ++ show waitUntil
 
   -- mypi <- getProcessInfo mypid
   -- liftIO $ putStrLn $ show mypi
 
   -- start clock with last added node
-  when (idx == 0) $ do
-       r <- liftIO mkrandom
-       sendMessage $ Msg 1 r (processNodeId mypid)
+  when (nidx == 0) $
+    sendMessage Starting
 
 
 remotable ['on_Worker]
@@ -222,6 +268,6 @@ runWorker :: Params -> IO ()
 runWorker Worker {host=h, port=p} = do
   backend <- initializeBackend h p myRemoteTable
   startSlave backend
-runWorker Controller{} = do
+runWorker Controller{} =
   liftIO $ print "was called with wrong type of parameters!"
 

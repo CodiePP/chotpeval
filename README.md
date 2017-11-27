@@ -23,11 +23,6 @@ ghci> sumprod <lastindex>
 
 ## Liquid Haskell
 
-check a file with:
-```
-  stack exec liquid -- --notermination src/HCOTP/Network/Worker.hs 
-```
-
 for the random number generator, its output is restricted to be in the interval (0,1] (not including zero)
 ```
   stack exec liquid -- --notermination src/HCOTP/Computation/Random.hs 

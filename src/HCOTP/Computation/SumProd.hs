@@ -1,3 +1,14 @@
+{-|
+Module      : SumProd
+Description : calculates sum of products
+Copyright   : (c) 2017 Alexander Diemand
+License     : BSD-3
+Maintainer  : codieplusplus@apax.net
+Stability   : experimental
+Portability : GHC
+
+-}
+
 {-# OPTIONS_HADDOCK ignore-exports #-}
 
 module HCOTP.Computation.SumProd
